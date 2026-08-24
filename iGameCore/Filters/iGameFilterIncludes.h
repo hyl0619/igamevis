@@ -35,3 +35,4 @@
 #include "FeatureExtraction/iGameVortexDetectionFilter.h"
 #include "FeatureExtraction/iGameVortexFilter.h"
 #include "PassArrays/iGamePassArraysFilter.h"
+#include "VolumeOfRevolution/iGameVolumeOfRevolutionFilter.h"

@@ -1959,6 +1959,125 @@ void igQtMainWindow::initAllFilters() {
             }
         });
     });
+    QAction* volRevAction = ui->menu_filters->addAction(QStringLiteral("旋转体生成 (Volume of Revolution)"));
+    connect(volRevAction, &QAction::triggered, this, [this]() {
+        if (rendererWidget->GetScene()->GetCurrentModel() == nullptr) {
+            showDarkFramelessMessage(
+                    QStringLiteral("提示"),
+                    QStringLiteral("请先加载轮廓线网格（UnstructuredMesh/SurfaceMesh/StructuredMesh）。"));
+            return;
+        }
+        auto obj = rendererWidget->GetScene()->GetCurrentModel()->GetDataObject();
+        if (!obj) return;
+
+        // 检查是否为 UnstructuredMesh
+
+        IGenum type = obj->GetDataObjectType();
+        if (type != IG_UNSTRUCTURED_MESH && type != IG_SURFACE_MESH && type != IG_STRUCTURED_MESH) {
+            showDarkFramelessMessage(
+                    QStringLiteral("不支持"),
+                    QStringLiteral("输入必须是 UnstructuredMesh或者SurfaceMesh或者StructuredMesh类型的轮廓线。"));
+            return;
+        }
+
+        // 弹出参数对话框
+        igQtFilterDialogDockWidget* dialog = new igQtFilterDialogDockWidget(this, true);
+        dialog->setFilterTitle(QStringLiteral("旋转体生成"));
+        dialog->setFilterDescription(QStringLiteral("设置旋转轴、分段数和角度"));
+        int resId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("分段数"), "36");
+        int angleId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("旋转角度 (度)"),
+                                           "360.0");
+
+        int axisXId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("轴向 X"), "0.0");
+        int axisYId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("轴向 Y"), "0.0");
+        int axisZId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("轴向 Z"), "1.0");
+
+
+        int pointXId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("轴点 X"), "0.0");
+        int pointYId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("轴点 Y"), "0.0");
+        int pointZId = dialog->addParameter(igQtFilterDialogDockWidget::QT_LINE_EDIT, QStringLiteral("轴点 Z"), "0.0");
+
+        dialog->show();
+
+        dialog->setApplyFunctor([this, obj, axisXId, axisYId, axisZId, pointXId, pointYId, pointZId, resId, angleId,
+                                 dialog]() {
+            bool ok = true;
+            // 读取轴向分量
+            auto getDouble = [&](int id, double& val, const QString& name) -> bool {
+                QLineEdit* edit = qobject_cast<QLineEdit*>(dialog->getWidget(id));
+                if (!edit) {
+                    showDarkFramelessMessage(QStringLiteral("错误"), QStringLiteral("无法获取控件：") + name);
+                    return false;
+                }
+                val = edit->text().toDouble(&ok);
+                if (!ok) {
+                    showDarkFramelessMessage(QStringLiteral("错误"), QStringLiteral("请输入有效的数值：") + name);
+                    return false;
+                }
+                return true;
+            };
+            double ax, ay, az, px, py, pz;
+            if (!getDouble(axisXId, ax, "轴向 X")) return;
+            if (!getDouble(axisYId, ay, "轴向 Y")) return;
+            if (!getDouble(axisZId, az, "轴向 Z")) return;
+            if (!getDouble(pointXId, px, "轴点 X")) return;
+            if (!getDouble(pointYId, py, "轴点 Y")) return;
+            if (!getDouble(pointZId, pz, "轴点 Z")) return;
+
+            Vector3d dir(ax, ay, az);
+            if (dir.norm() < 1e-12) {
+                showDarkFramelessMessage(QStringLiteral("错误"),
+                                         QStringLiteral("轴向方向向量不能为零，请至少一个分量非零。"));
+                return;
+            }
+            dir.normalize();
+
+            Vector3d point(px, py, pz);
+            // 获取分段数
+            QLineEdit* resEdit = qobject_cast<QLineEdit*>(dialog->getWidget(resId));
+            if (!resEdit) {
+                showDarkFramelessMessage(QStringLiteral("错误"), QStringLiteral("无法获取分段数输入框。"));
+                return;
+            }
+            int resolution = resEdit->text().toInt(&ok);
+            if (!ok || resolution < 3) {
+                showDarkFramelessMessage(QStringLiteral("错误"), QStringLiteral("分段数至少为 3。"));
+                return;
+            }
+
+            QLineEdit* angleEdit = qobject_cast<QLineEdit*>(dialog->getWidget(angleId));
+            if (!angleEdit) {
+                showDarkFramelessMessage(QStringLiteral("错误"), QStringLiteral("无法获取角度输入框。"));
+                return;
+            }
+            double angleDeg = angleEdit->text().toDouble(&ok);
+            if (!ok || angleDeg <= 0) {
+                showDarkFramelessMessage(QStringLiteral("错误"),
+                                         QStringLiteral("请输入有效的角度（正数，单位：度）。"));
+                return;
+            }
+            double angleRad = angleDeg * M_PI / 180.0;
+
+
+            auto filter = VolumeOfRevolutionFilter::New();
+            filter->SetAxis(dir, point);
+            filter->SetResolution(resolution);
+            filter->SetAngle(angleRad);
+            filter->SetInput(obj);
+
+            if (!filter->Execute()) {
+                showDarkFramelessMessage(QStringLiteral("执行失败"), QStringLiteral("旋转体生成失败，请检查轮廓线。"));
+                return;
+            }
+            auto output = filter->GetOutput();
+            if (output) {
+                output->SetName(obj->GetName() + QStringLiteral("_revolution").toStdString());
+                modelTreeWidget->addDataObjectToModelTree(output, Algorithm);
+                rendererWidget->update();
+                dialog->close();
+            }
+        });
+    });
 }
 
 void igQtMainWindow::initAllDockWidgetConnectWithAction() {
